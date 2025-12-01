@@ -19,6 +19,7 @@ public class CCKEnhancementEditorWindow : EditorWindow
     private Dictionary<GameObject, List<string>> animPropCache = new Dictionary<GameObject, List<string>>();
     private Dictionary<Material, List<string>> materialPropCache = new Dictionary<Material, List<string>>();
     private Dictionary<Material, Dictionary<string, ShaderUtil.ShaderPropertyType>> materialPropTypes = new Dictionary<Material, Dictionary<string, ShaderUtil.ShaderPropertyType>>();
+    private bool showConflictsFoldout = true;
 
     [MenuItem("CVR Tools/CCK Enhancement")]
     public static void ShowWindow() => GetWindow<CCKEnhancementEditorWindow>("CCK Enhancement");
@@ -53,16 +54,98 @@ public class CCKEnhancementEditorWindow : EditorWindow
             if (GUILayout.Button("X", GUILayout.Width(20))) remIdx = i;
             EditorGUILayout.EndHorizontal();
         }
-        if (remIdx >= 0) animatorMergeData.animators.RemoveAt(remIdx);
+        if (remIdx >= 0)
+        {
+            animatorMergeData.animators.RemoveAt(remIdx);
+            animatorMergeData.conflictsScanned = false; // invalidate scan
+        }
 
         if (GUILayout.Button("Add Animator Controller"))
-            animatorMergeData.animators.Add(null);
-
-        if (GUILayout.Button("Merge Animators"))
         {
-            if (CCKEnhancementEditorHelpers.ValidateAvatarAndAnimators(avatarRoot, animatorMergeData.animators))
-                CCKEnhancementEditorHelpers.PerformAnimatorMerge(animatorMergeData.animators, avatarRoot);
+            animatorMergeData.animators.Add(null);
+            animatorMergeData.conflictsScanned = false;
         }
+
+        using (new EditorGUI.DisabledScope(!CCKEnhancementEditorHelpers.ValidateAvatarAndAnimators(avatarRoot, animatorMergeData.animators)))
+        {
+            if (GUILayout.Button("Scan Conflicts"))
+            {
+                CCKEnhancementEditorHelpers.ScanAnimatorConflicts(animatorMergeData, avatarRoot);
+            }
+        }
+
+        DrawConflictResolver(animatorMergeData);
+
+        using (new EditorGUI.DisabledScope(!animatorMergeData.conflictsScanned))
+        {
+            if (GUILayout.Button("Merge Animators"))
+            {
+                if (CCKEnhancementEditorHelpers.ValidateAvatarAndAnimators(avatarRoot, animatorMergeData.animators))
+                    CCKEnhancementEditorHelpers.PerformAnimatorMerge(animatorMergeData, avatarRoot);
+            }
+        }
+    }
+
+    void DrawConflictResolver(AnimatorMergeData data)
+    {
+        if (!data.conflictsScanned) return;
+
+        showConflictsFoldout = EditorGUILayout.Foldout(showConflictsFoldout, "Animator Merge Conflicts (Resolve Before Merge)", true);
+        if (!showConflictsFoldout) return;
+
+        EditorGUILayout.BeginVertical("box");
+
+        // Parameters
+        EditorGUILayout.LabelField("Parameter Conflicts (Used Parameters Only)", EditorStyles.boldLabel);
+        if (data.parameterConflicts.Count == 0)
+        {
+            EditorGUILayout.LabelField("No parameter conflicts found.");
+        }
+        else
+        {
+            foreach (var c in data.parameterConflicts)
+            {
+                EditorGUILayout.BeginVertical("box");
+                EditorGUILayout.LabelField($"Incoming: {c.incomingParameterName} ({c.incomingType})");
+                EditorGUILayout.LabelField($"Base: {c.incomingParameterName} ({c.baseType})");
+
+                c.resolution = (ParameterConflictResolution)EditorGUILayout.EnumPopup("Resolution", c.resolution);
+                if (c.resolution == ParameterConflictResolution.Rename)
+                {
+                    c.resolvedParameterName = EditorGUILayout.TextField("Rename To", c.resolvedParameterName);
+                }
+
+                EditorGUILayout.EndVertical();
+            }
+        }
+
+        EditorGUILayout.Space(6);
+
+        // Layers
+        EditorGUILayout.LabelField("Layer Conflicts", EditorStyles.boldLabel);
+        if (data.layerConflicts.Count == 0)
+        {
+            EditorGUILayout.LabelField("No layer conflicts found.");
+        }
+        else
+        {
+            foreach (var c in data.layerConflicts)
+            {
+                EditorGUILayout.BeginVertical("box");
+                EditorGUILayout.LabelField($"Incoming: {c.incomingLayerName}");
+                EditorGUILayout.LabelField($"Base: {c.baseLayerName}");
+
+                c.resolution = (LayerConflictResolution)EditorGUILayout.EnumPopup("Resolution", c.resolution);
+                if (c.resolution == LayerConflictResolution.Rename)
+                {
+                    c.resolvedLayerName = EditorGUILayout.TextField("Rename To", c.resolvedLayerName);
+                }
+
+                EditorGUILayout.EndVertical();
+            }
+        }
+
+        EditorGUILayout.EndVertical();
     }
 
     void DrawPropertyAnimationGenerationUI()
@@ -91,7 +174,7 @@ public class CCKEnhancementEditorWindow : EditorWindow
                     if (entry.materialTargetObjects.Count > 0)
                     {
                         EditorGUILayout.LabelField($"Objects with material ({entry.materialTargetObjects.Count}):", EditorStyles.boldLabel);
-                        
+
                         EditorGUILayout.BeginHorizontal();
                         if (GUILayout.Button("Select All", GUILayout.Width(100)))
                         {
@@ -132,7 +215,7 @@ public class CCKEnhancementEditorWindow : EditorWindow
                         if (!string.IsNullOrEmpty(entry.serializedProperty))
                         {
                             string propName = entry.serializedProperty.Split(new[] { ' ' }, 2)[0].Replace("material.", "");
-                            if (materialPropTypes.ContainsKey(entry.targetMaterial) && 
+                            if (materialPropTypes.ContainsKey(entry.targetMaterial) &&
                                 materialPropTypes[entry.targetMaterial].ContainsKey(propName))
                             {
                                 var propType = materialPropTypes[entry.targetMaterial][propName];
@@ -169,18 +252,15 @@ public class CCKEnhancementEditorWindow : EditorWindow
             }
 
             entry.advAvatarPropertyName = EditorGUILayout.TextField("Advanced Avatar Property Name", entry.advAvatarPropertyName);
-            
-            // Show property type selector
+
             if (!entry.useMaterialProperty)
                 entry.advAvatarPropertyType = (AdvAvatarPropertyType)EditorGUILayout.EnumPopup("Property Type", entry.advAvatarPropertyType);
             else
                 EditorGUILayout.LabelField("Property Type (Auto-detected)", entry.advAvatarPropertyType.ToString());
-            
-            // CVR Settings Type selection
+
             EditorGUILayout.LabelField("CVR Advanced Settings Type", EditorStyles.boldLabel);
             entry.cvrSettingsType = (CVRSettingsType)EditorGUILayout.EnumPopup("Settings Type", entry.cvrSettingsType);
 
-            // Show appropriate value selectors based on CVR settings type and property type
             if (entry.cvrSettingsType == CVRSettingsType.Color)
             {
                 if (entry.advAvatarPropertyType == AdvAvatarPropertyType.Color)
@@ -196,12 +276,12 @@ public class CCKEnhancementEditorWindow : EditorWindow
             else if (entry.cvrSettingsType == CVRSettingsType.Dropdown)
             {
                 entry.dropdownOptionCount = EditorGUILayout.IntField("Number of Options", Mathf.Max(2, entry.dropdownOptionCount));
-                
+
                 while (entry.dropdownOptionNames.Count < entry.dropdownOptionCount)
                     entry.dropdownOptionNames.Add($"Option {entry.dropdownOptionNames.Count}");
                 while (entry.dropdownOptionNames.Count > entry.dropdownOptionCount)
                     entry.dropdownOptionNames.RemoveAt(entry.dropdownOptionNames.Count - 1);
-                
+
                 EditorGUILayout.LabelField("Dropdown Options:", EditorStyles.boldLabel);
                 for (int j = 0; j < entry.dropdownOptionNames.Count; j++)
                 {
@@ -336,13 +416,13 @@ public class CCKEnhancementEditorWindow : EditorWindow
         var propTypes = new Dictionary<string, ShaderUtil.ShaderPropertyType>();
         Shader shader = material.shader;
         int propCount = ShaderUtil.GetPropertyCount(shader);
-        
+
         for (int i = 0; i < propCount; i++)
         {
             string propName = ShaderUtil.GetPropertyName(shader, i);
             ShaderUtil.ShaderPropertyType propType = ShaderUtil.GetPropertyType(shader, i);
-            
-            if (propType == ShaderUtil.ShaderPropertyType.Float || 
+
+            if (propType == ShaderUtil.ShaderPropertyType.Float ||
                 propType == ShaderUtil.ShaderPropertyType.Range ||
                 propType == ShaderUtil.ShaderPropertyType.Color ||
                 propType == ShaderUtil.ShaderPropertyType.Vector)
@@ -352,7 +432,7 @@ public class CCKEnhancementEditorWindow : EditorWindow
                     displayName += " (Color)";
                 else if (propType == ShaderUtil.ShaderPropertyType.Range)
                     displayName += " (Range)";
-                
+
                 props.Add(displayName);
                 propTypes[propName] = propType;
             }
@@ -384,6 +464,7 @@ public class CCKEnhancementComponentEditor : Editor
     private Dictionary<GameObject, List<string>> animPropCache = new Dictionary<GameObject, List<string>>();
     private Dictionary<Material, List<string>> materialPropCache = new Dictionary<Material, List<string>>();
     private Dictionary<Material, Dictionary<string, ShaderUtil.ShaderPropertyType>> materialPropTypes = new Dictionary<Material, Dictionary<string, ShaderUtil.ShaderPropertyType>>();
+    private bool showConflictsFoldout = true;
 
     public override void OnInspectorGUI()
     {
@@ -411,24 +492,103 @@ public class CCKEnhancementComponentEditor : Editor
 
     void DrawAnimatorMergeUI(CCKEnhancementComponent component)
     {
+        var data = component.animatorMergeData;
+
         int remIdx = -1;
-        for (int i = 0; i < component.animatorMergeData.animators.Count; i++)
+        for (int i = 0; i < data.animators.Count; i++)
         {
             EditorGUILayout.BeginHorizontal();
-            component.animatorMergeData.animators[i] = (AnimatorController)EditorGUILayout.ObjectField(component.animatorMergeData.animators[i], typeof(AnimatorController), false);
+            data.animators[i] = (AnimatorController)EditorGUILayout.ObjectField(data.animators[i], typeof(AnimatorController), false);
             if (GUILayout.Button("X", GUILayout.Width(20))) remIdx = i;
             EditorGUILayout.EndHorizontal();
         }
-        if (remIdx >= 0) component.animatorMergeData.animators.RemoveAt(remIdx);
+
+        if (remIdx >= 0)
+        {
+            data.animators.RemoveAt(remIdx);
+            data.conflictsScanned = false;
+        }
 
         if (GUILayout.Button("Add Animator Controller"))
-            component.animatorMergeData.animators.Add(null);
-
-        if (GUILayout.Button("Merge Animators"))
         {
-            if (CCKEnhancementEditorHelpers.ValidateAvatarAndAnimators(component.avatarRoot, component.animatorMergeData.animators))
-                CCKEnhancementEditorHelpers.PerformAnimatorMerge(component.animatorMergeData.animators, component.avatarRoot);
+            data.animators.Add(null);
+            data.conflictsScanned = false;
         }
+
+        using (new EditorGUI.DisabledScope(!CCKEnhancementEditorHelpers.ValidateAvatarAndAnimators(component.avatarRoot, data.animators)))
+        {
+            if (GUILayout.Button("Scan Conflicts"))
+            {
+                CCKEnhancementEditorHelpers.ScanAnimatorConflicts(data, component.avatarRoot);
+            }
+        }
+
+        DrawConflictResolver(data);
+
+        using (new EditorGUI.DisabledScope(!data.conflictsScanned))
+        {
+            if (GUILayout.Button("Merge Animators"))
+            {
+                if (CCKEnhancementEditorHelpers.ValidateAvatarAndAnimators(component.avatarRoot, data.animators))
+                    CCKEnhancementEditorHelpers.PerformAnimatorMerge(data, component.avatarRoot);
+            }
+        }
+    }
+
+    void DrawConflictResolver(AnimatorMergeData data)
+    {
+        if (!data.conflictsScanned) return;
+
+        showConflictsFoldout = EditorGUILayout.Foldout(showConflictsFoldout, "Animator Merge Conflicts (Resolve Before Merge)", true);
+        if (!showConflictsFoldout) return;
+
+        EditorGUILayout.BeginVertical("box");
+
+        EditorGUILayout.LabelField("Parameter Conflicts (Used Parameters Only)", EditorStyles.boldLabel);
+        if (data.parameterConflicts.Count == 0)
+        {
+            EditorGUILayout.LabelField("No parameter conflicts found.");
+        }
+        else
+        {
+            foreach (var c in data.parameterConflicts)
+            {
+                EditorGUILayout.BeginVertical("box");
+                EditorGUILayout.LabelField($"Incoming: {c.incomingParameterName} ({c.incomingType})");
+                EditorGUILayout.LabelField($"Base: {c.incomingParameterName} ({c.baseType})");
+                c.resolution = (ParameterConflictResolution)EditorGUILayout.EnumPopup("Resolution", c.resolution);
+                if (c.resolution == ParameterConflictResolution.Rename)
+                {
+                    c.resolvedParameterName = EditorGUILayout.TextField("Rename To", c.resolvedParameterName);
+                }
+                EditorGUILayout.EndVertical();
+            }
+        }
+
+        EditorGUILayout.Space(6);
+
+        EditorGUILayout.LabelField("Layer Conflicts", EditorStyles.boldLabel);
+        if (data.layerConflicts.Count == 0)
+        {
+            EditorGUILayout.LabelField("No layer conflicts found.");
+        }
+        else
+        {
+            foreach (var c in data.layerConflicts)
+            {
+                EditorGUILayout.BeginVertical("box");
+                EditorGUILayout.LabelField($"Incoming: {c.incomingLayerName}");
+                EditorGUILayout.LabelField($"Base: {c.baseLayerName}");
+                c.resolution = (LayerConflictResolution)EditorGUILayout.EnumPopup("Resolution", c.resolution);
+                if (c.resolution == LayerConflictResolution.Rename)
+                {
+                    c.resolvedLayerName = EditorGUILayout.TextField("Rename To", c.resolvedLayerName);
+                }
+                EditorGUILayout.EndVertical();
+            }
+        }
+
+        EditorGUILayout.EndVertical();
     }
 
     void DrawPropertyAnimationGenerationUI(CCKEnhancementComponent component)
@@ -457,7 +617,7 @@ public class CCKEnhancementComponentEditor : Editor
                     if (entry.materialTargetObjects.Count > 0)
                     {
                         EditorGUILayout.LabelField($"Objects with material ({entry.materialTargetObjects.Count}):", EditorStyles.boldLabel);
-                        
+
                         EditorGUILayout.BeginHorizontal();
                         if (GUILayout.Button("Select All", GUILayout.Width(100)))
                         {
@@ -498,7 +658,7 @@ public class CCKEnhancementComponentEditor : Editor
                         if (!string.IsNullOrEmpty(entry.serializedProperty))
                         {
                             string propName = entry.serializedProperty.Split(new[] { ' ' }, 2)[0].Replace("material.", "");
-                            if (materialPropTypes.ContainsKey(entry.targetMaterial) && 
+                            if (materialPropTypes.ContainsKey(entry.targetMaterial) &&
                                 materialPropTypes[entry.targetMaterial].ContainsKey(propName))
                             {
                                 var propType = materialPropTypes[entry.targetMaterial][propName];
@@ -535,12 +695,12 @@ public class CCKEnhancementComponentEditor : Editor
             }
 
             entry.advAvatarPropertyName = EditorGUILayout.TextField("Advanced Avatar Property Name", entry.advAvatarPropertyName);
-            
+
             if (!entry.useMaterialProperty)
                 entry.advAvatarPropertyType = (AdvAvatarPropertyType)EditorGUILayout.EnumPopup("Property Type", entry.advAvatarPropertyType);
             else
                 EditorGUILayout.LabelField("Property Type (Auto-detected)", entry.advAvatarPropertyType.ToString());
-            
+
             EditorGUILayout.LabelField("CVR Advanced Settings Type", EditorStyles.boldLabel);
             entry.cvrSettingsType = (CVRSettingsType)EditorGUILayout.EnumPopup("Settings Type", entry.cvrSettingsType);
 
@@ -559,12 +719,12 @@ public class CCKEnhancementComponentEditor : Editor
             else if (entry.cvrSettingsType == CVRSettingsType.Dropdown)
             {
                 entry.dropdownOptionCount = EditorGUILayout.IntField("Number of Options", Mathf.Max(2, entry.dropdownOptionCount));
-                
+
                 while (entry.dropdownOptionNames.Count < entry.dropdownOptionCount)
                     entry.dropdownOptionNames.Add($"Option {entry.dropdownOptionNames.Count}");
                 while (entry.dropdownOptionNames.Count > entry.dropdownOptionCount)
                     entry.dropdownOptionNames.RemoveAt(entry.dropdownOptionNames.Count - 1);
-                
+
                 EditorGUILayout.LabelField("Dropdown Options:", EditorStyles.boldLabel);
                 for (int j = 0; j < entry.dropdownOptionNames.Count; j++)
                 {
@@ -699,13 +859,13 @@ public class CCKEnhancementComponentEditor : Editor
         var propTypes = new Dictionary<string, ShaderUtil.ShaderPropertyType>();
         Shader shader = material.shader;
         int propCount = ShaderUtil.GetPropertyCount(shader);
-        
+
         for (int i = 0; i < propCount; i++)
         {
             string propName = ShaderUtil.GetPropertyName(shader, i);
             ShaderUtil.ShaderPropertyType propType = ShaderUtil.GetPropertyType(shader, i);
-            
-            if (propType == ShaderUtil.ShaderPropertyType.Float || 
+
+            if (propType == ShaderUtil.ShaderPropertyType.Float ||
                 propType == ShaderUtil.ShaderPropertyType.Range ||
                 propType == ShaderUtil.ShaderPropertyType.Color ||
                 propType == ShaderUtil.ShaderPropertyType.Vector)
@@ -715,7 +875,7 @@ public class CCKEnhancementComponentEditor : Editor
                     displayName += " (Color)";
                 else if (propType == ShaderUtil.ShaderPropertyType.Range)
                     displayName += " (Range)";
-                
+
                 props.Add(displayName);
                 propTypes[propName] = propType;
             }
@@ -765,9 +925,191 @@ public static class CCKEnhancementEditorHelpers
         return true;
     }
 
-    public static void PerformAnimatorMerge(List<AnimatorController> anims, GameObject avatar)
+    // =====================================================
+    // PARAMETER USAGE SCAN (USED ONLY MERGE)
+    // =====================================================
+
+    private static HashSet<string> GetUsedParameters(AnimatorController controller)
     {
-        if (anims == null || anims.Count < 1) 
+        var used = new HashSet<string>();
+        if (controller == null) return used;
+
+        foreach (var layer in controller.layers)
+        {
+            if (layer?.stateMachine == null) continue;
+            CollectParametersFromStateMachine(layer.stateMachine, used);
+        }
+
+        return used;
+    }
+
+    private static void CollectParametersFromStateMachine(AnimatorStateMachine sm, HashSet<string> used)
+    {
+        if (sm == null) return;
+
+        foreach (var t in sm.anyStateTransitions)
+            CollectFromConditions(t.conditions, used);
+
+        foreach (var t in sm.entryTransitions)
+            CollectFromConditions(t.conditions, used);
+
+        foreach (var child in sm.states)
+        {
+            var st = child.state;
+            if (st == null) continue;
+
+            CollectFromMotion(st.motion, used);
+
+            foreach (var t in st.transitions)
+                CollectFromConditions(t.conditions, used);
+        }
+
+        foreach (var childSm in sm.stateMachines)
+            CollectParametersFromStateMachine(childSm.stateMachine, used);
+    }
+
+    private static void CollectFromConditions(AnimatorCondition[] conditions, HashSet<string> used)
+    {
+        if (conditions == null) return;
+        foreach (var c in conditions)
+        {
+            if (!string.IsNullOrEmpty(c.parameter))
+                used.Add(c.parameter);
+        }
+    }
+
+    private static void CollectFromMotion(Motion motion, HashSet<string> used)
+    {
+        if (motion == null) return;
+        if (motion is BlendTree bt)
+            CollectFromBlendTree(bt, used);
+    }
+
+    private static void CollectFromBlendTree(BlendTree bt, HashSet<string> used)
+    {
+        if (bt == null) return;
+
+        if (!string.IsNullOrEmpty(bt.blendParameter))
+            used.Add(bt.blendParameter);
+
+        if (!string.IsNullOrEmpty(bt.blendParameterY))
+            used.Add(bt.blendParameterY);
+
+        foreach (var child in bt.children)
+        {
+            if (!string.IsNullOrEmpty(child.directBlendParameter))
+                used.Add(child.directBlendParameter);
+
+            if (child.motion is BlendTree childBt)
+                CollectFromBlendTree(childBt, used);
+        }
+    }
+
+    // =====================================================
+    //  PRE-SCAN CONFLICTS (VISIBLE RESOLVER)
+    // =====================================================
+
+    public static void ScanAnimatorConflicts(AnimatorMergeData data, GameObject avatar)
+    {
+        data.layerConflicts.Clear();
+        data.parameterConflicts.Clear();
+        data.conflictsScanned = false;
+
+        CVRAvatar cvrAvatar = avatar.GetComponent<CVRAvatar>();
+        if (cvrAvatar == null || cvrAvatar.avatarSettings == null || cvrAvatar.avatarSettings.baseController == null)
+        {
+            EditorUtility.DisplayDialog("Error", "No base controller found in avatar settings.", "OK");
+            return;
+        }
+
+        AnimatorController baseController = cvrAvatar.avatarSettings.baseController as AnimatorController;
+        if (baseController == null)
+        {
+            EditorUtility.DisplayDialog("Error", "Base controller is not an AnimatorController.", "OK");
+            return;
+        }
+
+        var baseLayerNames = new HashSet<string>(baseController.layers.Select(l => l.name));
+        var baseParams = baseController.parameters.ToDictionary(p => p.name, p => p.type);
+
+        foreach (var anim in data.animators)
+        {
+            if (anim == null) continue;
+            string srcPath = AssetDatabase.GetAssetPath(anim);
+
+            var usedParams = GetUsedParameters(anim);
+
+            // Parameters (USED only)
+            foreach (var p in anim.parameters)
+            {
+                if (!usedParams.Contains(p.name))
+                    continue;
+
+                if (baseParams.TryGetValue(p.name, out var baseType))
+                {
+                    if (!data.parameterConflicts.Any(x => x.sourceControllerPath == srcPath && x.incomingParameterName == p.name))
+                    {
+                        var c = new ParameterConflict
+                        {
+                            sourceControllerPath = srcPath,
+                            incomingParameterName = p.name,
+                            incomingType = p.type,
+                            baseType = baseType
+                        };
+
+                        if (baseType == p.type)
+                        {
+                            c.resolution = ParameterConflictResolution.UseSame;
+                            c.resolvedParameterName = p.name;
+                        }
+                        else
+                        {
+                            c.resolution = ParameterConflictResolution.Rename;
+                            c.resolvedParameterName = MakeUniqueParameterName(baseController, p.name);
+                        }
+
+                        data.parameterConflicts.Add(c);
+                    }
+                }
+            }
+
+            // Layers
+            foreach (var l in anim.layers)
+            {
+                if (baseLayerNames.Contains(l.name))
+                {
+                    if (!data.layerConflicts.Any(x => x.sourceControllerPath == srcPath && x.incomingLayerName == l.name))
+                    {
+                        var c = new LayerConflict
+                        {
+                            sourceControllerPath = srcPath,
+                            incomingLayerName = l.name,
+                            baseLayerName = l.name,
+                            resolution = LayerConflictResolution.Rename,
+                            resolvedLayerName = MakeUniqueLayerName(baseController, l.name)
+                        };
+                        data.layerConflicts.Add(c);
+                    }
+                }
+            }
+        }
+
+        data.conflictsScanned = true;
+
+        EditorUtility.DisplayDialog(
+            "Conflict Scan Complete",
+            $"Found:\n- {data.parameterConflicts.Count} USED parameter conflict(s)\n- {data.layerConflicts.Count} layer conflict(s)\n\nResolve them below before merging.",
+            "OK"
+        );
+    }
+
+    // =====================================================
+    //  MERGE USING SAVED RESOLUTIONS
+    // =====================================================
+
+    public static void PerformAnimatorMerge(AnimatorMergeData data, GameObject avatar)
+    {
+        if (data == null || data.animators == null || data.animators.Count < 1)
         {
             EditorUtility.DisplayDialog("Error", "Add at least 1 animator controller to merge", "OK");
             return;
@@ -780,9 +1122,19 @@ public static class CCKEnhancementEditorHelpers
             return;
         }
 
-        if (cvrAvatar.avatarSettings == null || cvrAvatar.avatarSettings.baseController == null)
+        // Ensure advanced avatar settings exist/initialized
+        if (cvrAvatar.avatarSettings == null || !cvrAvatar.avatarSettings.initialized)
         {
-            EditorUtility.DisplayDialog("Error", "No base controller found in avatar settings. Please set up advanced avatar settings first.", "OK");
+            cvrAvatar.avatarSettings = new CVRAdvancedAvatarSettings
+            {
+                settings = new List<CVRAdvancedSettingsEntry>(),
+                initialized = true
+            };
+        }
+
+        if (cvrAvatar.avatarSettings.baseController == null)
+        {
+            EditorUtility.DisplayDialog("Error", "No base controller found in avatar settings.", "OK");
             return;
         }
 
@@ -793,86 +1145,376 @@ public static class CCKEnhancementEditorHelpers
             return;
         }
 
+        // Create NEW merged controller asset from base
         string folder = "Assets/AdvancedSettings.Generated";
         if (!AssetDatabase.IsValidFolder(folder))
             AssetDatabase.CreateFolder("Assets", "AdvancedSettings.Generated");
 
-        string backupFolder = $"{folder}/Backups";
-        if (!AssetDatabase.IsValidFolder(backupFolder))
-            AssetDatabase.CreateFolder(folder, "Backups");
+        string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+        string basePath = AssetDatabase.GetAssetPath(baseController);
+        string mergedPath = $"{folder}/{baseController.name}_Merged_{timestamp}.controller";
 
-        string timestamp = System.DateTime.Now.ToString("yyyyMMdd_HHmmss");
-        string baseControllerPath = AssetDatabase.GetAssetPath(baseController);
-        string backupPath = $"{backupFolder}/{baseController.name}_Backup_{timestamp}.controller";
-        
-        if (!AssetDatabase.CopyAsset(baseControllerPath, backupPath))
+        if (!AssetDatabase.CopyAsset(basePath, mergedPath))
         {
-            EditorUtility.DisplayDialog("Error", "Failed to create backup of base controller", "OK");
+            EditorUtility.DisplayDialog("Error", "Failed to create merged controller asset", "OK");
             return;
         }
 
-        Debug.Log($"Created backup of base controller at: {backupPath}");
+        AssetDatabase.ImportAsset(mergedPath);
+        AnimatorController mergedController = AssetDatabase.LoadAssetAtPath<AnimatorController>(mergedPath);
+        if (mergedController == null)
+        {
+            EditorUtility.DisplayDialog("Error", "Failed to load merged controller asset", "OK");
+            return;
+        }
 
-        foreach (var anim in anims)
+        foreach (var anim in data.animators)
         {
             if (anim == null) continue;
+            string srcPath = AssetDatabase.GetAssetPath(anim);
 
-            foreach (var param in anim.parameters)
+            var usedParams = GetUsedParameters(anim);
+
+            Dictionary<string, string> parameterRenameMap = new Dictionary<string, string>();
+
+            // PARAMETERS (USED ONLY)
+            foreach (var p in anim.parameters)
             {
-                if (!baseController.parameters.Any(p => p.name == param.name && p.type == param.type))
+                if (!usedParams.Contains(p.name))
+                    continue;
+
+                var conflict = data.parameterConflicts.FirstOrDefault(c =>
+                    c.sourceControllerPath == srcPath && c.incomingParameterName == p.name);
+
+                if (conflict != null)
                 {
-                    baseController.AddParameter(param);
+                    switch (conflict.resolution)
+                    {
+                        case ParameterConflictResolution.UseSame:
+                        case ParameterConflictResolution.Discard:
+                            continue;
+
+                        case ParameterConflictResolution.Rename:
+                            string finalName = EnsureUniqueParameterName(mergedController, conflict.resolvedParameterName);
+                            if (!mergedController.parameters.Any(x => x.name == finalName))
+                            {
+                                mergedController.AddParameter(new AnimatorControllerParameter
+                                {
+                                    name = finalName,
+                                    type = p.type,
+                                    defaultBool = p.defaultBool,
+                                    defaultFloat = p.defaultFloat,
+                                    defaultInt = p.defaultInt
+                                });
+                            }
+                            parameterRenameMap[p.name] = finalName;
+                            continue;
+                    }
                 }
+
+                if (!mergedController.parameters.Any(x => x.name == p.name))
+                    mergedController.AddParameter(p);
             }
 
-            foreach (var layer in anim.layers)
+            // LAYERS
+            foreach (var l in anim.layers)
             {
-                bool layerExists = false;
-                foreach (var existingLayer in baseController.layers)
-                {
-                    if (existingLayer.name == layer.name)
-                    {
-                        layerExists = true;
-                        break;
-                    }
-                }
+                var conflict = data.layerConflicts.FirstOrDefault(c =>
+                    c.sourceControllerPath == srcPath && c.incomingLayerName == l.name);
 
-                string layerName = layer.name;
-                int suffix = 1;
-                while (layerExists)
+                bool overrideLayer = false;
+                string finalLayerName = l.name;
+
+                if (conflict != null)
                 {
-                    layerName = $"{layer.name}_{suffix}";
-                    layerExists = false;
-                    foreach (var existingLayer in baseController.layers)
+                    switch (conflict.resolution)
                     {
-                        if (existingLayer.name == layerName)
-                        {
-                            layerExists = true;
+                        case LayerConflictResolution.Discard:
+                            continue;
+
+                        case LayerConflictResolution.Override:
+                            overrideLayer = true;
+                            finalLayerName = l.name;
                             break;
-                        }
+
+                        case LayerConflictResolution.Rename:
+                            finalLayerName = EnsureUniqueLayerName(mergedController, conflict.resolvedLayerName);
+                            break;
                     }
-                    suffix++;
+                }
+                else
+                {
+                    if (mergedController.layers.Any(x => x.name == finalLayerName))
+                        finalLayerName = EnsureUniqueLayerName(mergedController, finalLayerName);
                 }
 
-                var newLayer = new AnimatorControllerLayer()
+                int existingIndex = FindLayerIndex(mergedController, l.name);
+                if (overrideLayer && existingIndex >= 0)
+                    mergedController.RemoveLayer(existingIndex);
+
+                AnimatorStateMachine clonedSM = CloneStateMachine(l.stateMachine, l.stateMachine.name);
+                AddStateMachineSubAssetsToController(mergedController, clonedSM);
+
+                if (parameterRenameMap.Count > 0)
+                    RemapParametersInStateMachine(clonedSM, parameterRenameMap);
+
+                mergedController.AddLayer(new AnimatorControllerLayer
                 {
-                    name = layerName,
-                    defaultWeight = layer.defaultWeight,
-                    stateMachine = UnityEngine.Object.Instantiate(layer.stateMachine)
-                };
-                baseController.AddLayer(newLayer);
+                    name = finalLayerName,
+                    defaultWeight = l.defaultWeight,
+                    stateMachine = clonedSM,
+                    blendingMode = l.blendingMode,
+                    iKPass = l.iKPass,
+                    avatarMask = l.avatarMask,
+                    syncedLayerAffectsTiming = l.syncedLayerAffectsTiming,
+                    syncedLayerIndex = l.syncedLayerIndex
+                });
             }
         }
 
-        EditorUtility.SetDirty(baseController);
+        // Assign merged controller as Advanced Avatar Base Controller
+        Undo.RecordObject(cvrAvatar, "Assign merged base controller");
+        cvrAvatar.avatarSettings.baseController = mergedController;
+
+        EditorUtility.SetDirty(mergedController);
+        EditorUtility.SetDirty(cvrAvatar);
+
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
 
-        EditorUtility.DisplayDialog("Animator Merge Complete", 
-            $"Successfully merged {anims.Count} animator(s) into base controller.\n\n" +
-            $"Backup saved at:\n{backupPath}", 
-            "OK");
+        EditorUtility.DisplayDialog(
+            "Animator Merge Complete",
+            $"Merged {data.animators.Count} animator(s) into a NEW controller.\n\nNew controller:\n{mergedPath}\n\nAssigned as Advanced Avatar Base Controller.",
+            "OK"
+        );
     }
+
+    // Backwards-compatible overload
+    public static void PerformAnimatorMerge(List<AnimatorController> anims, GameObject avatar)
+    {
+        var tmp = new AnimatorMergeData { animators = anims };
+        ScanAnimatorConflicts(tmp, avatar);
+        PerformAnimatorMerge(tmp, avatar);
+    }
+
+    private static int FindLayerIndex(AnimatorController controller, string layerName)
+    {
+        for (int i = 0; i < controller.layers.Length; i++)
+            if (controller.layers[i].name == layerName)
+                return i;
+        return -1;
+    }
+
+    private static string MakeUniqueLayerName(AnimatorController controller, string baseName)
+    {
+        string name = baseName;
+        int i = 1;
+        while (controller.layers.Any(l => l.name == name))
+            name = $"{baseName}_{i++}";
+        return name;
+    }
+
+    private static string MakeUniqueParameterName(AnimatorController controller, string baseName)
+    {
+        string name = baseName;
+        int i = 1;
+        while (controller.parameters.Any(p => p.name == name))
+            name = $"{baseName}_{i++}";
+        return name;
+    }
+
+    private static string EnsureUniqueLayerName(AnimatorController controller, string desired)
+    {
+        if (!controller.layers.Any(l => l.name == desired)) return desired;
+        return MakeUniqueLayerName(controller, desired);
+    }
+
+    private static string EnsureUniqueParameterName(AnimatorController controller, string desired)
+    {
+        if (!controller.parameters.Any(p => p.name == desired)) return desired;
+        return MakeUniqueParameterName(controller, desired);
+    }
+
+    // ---------- SAFE CLONE (no Instantiate, fixed ambiguous CS0121 via casts) ----------
+    private static AnimatorStateMachine CloneStateMachine(AnimatorStateMachine src, string nameOverride = null)
+    {
+        if (src == null) return null;
+
+        var dst = new AnimatorStateMachine
+        {
+            name = string.IsNullOrEmpty(nameOverride) ? src.name : nameOverride,
+            anyStatePosition = src.anyStatePosition,
+            entryPosition = src.entryPosition,
+            exitPosition = src.exitPosition,
+            parentStateMachinePosition = src.parentStateMachinePosition
+        };
+
+        var stateMap = new Dictionary<AnimatorState, AnimatorState>();
+        var smMap = new Dictionary<AnimatorStateMachine, AnimatorStateMachine>();
+
+        foreach (var child in src.states)
+        {
+            var newState = dst.AddState(child.state.name, child.position);
+            EditorUtility.CopySerialized(child.state, newState);
+            newState.transitions = Array.Empty<AnimatorStateTransition>();
+            stateMap[child.state] = newState;
+        }
+
+        foreach (var childSM in src.stateMachines)
+        {
+            var newChildSM = CloneStateMachine(childSM.stateMachine);
+            smMap[childSM.stateMachine] = newChildSM;
+            dst.AddStateMachine(newChildSM, childSM.position);
+        }
+
+        foreach (var t in src.anyStateTransitions)
+        {
+            AnimatorStateTransition newT = dst.AddAnyStateTransition((AnimatorState)null);
+            EditorUtility.CopySerialized(t, newT);
+
+            newT.destinationState = t.destinationState != null && stateMap.ContainsKey(t.destinationState)
+                ? stateMap[t.destinationState]
+                : null;
+            newT.destinationStateMachine = t.destinationStateMachine != null && smMap.ContainsKey(t.destinationStateMachine)
+                ? smMap[t.destinationStateMachine]
+                : null;
+        }
+
+        foreach (var t in src.entryTransitions)
+        {
+            AnimatorTransition newT = dst.AddEntryTransition((AnimatorState)null);
+            EditorUtility.CopySerialized(t, newT);
+
+            newT.destinationState = t.destinationState != null && stateMap.ContainsKey(t.destinationState)
+                ? stateMap[t.destinationState]
+                : null;
+            newT.destinationStateMachine = t.destinationStateMachine != null && smMap.ContainsKey(t.destinationStateMachine)
+                ? smMap[t.destinationStateMachine]
+                : null;
+        }
+
+        foreach (var child in src.states)
+        {
+            var oldState = child.state;
+            if (!stateMap.TryGetValue(oldState, out var newState)) continue;
+
+            foreach (var t in oldState.transitions)
+            {
+                AnimatorStateTransition newT = newState.AddTransition((AnimatorState)null);
+                EditorUtility.CopySerialized(t, newT);
+
+                newT.destinationState = t.destinationState != null && stateMap.ContainsKey(t.destinationState)
+                    ? stateMap[t.destinationState]
+                    : null;
+                newT.destinationStateMachine = t.destinationStateMachine != null && smMap.ContainsKey(t.destinationStateMachine)
+                    ? smMap[t.destinationStateMachine]
+                    : null;
+            }
+        }
+
+        if (src.defaultState != null && stateMap.ContainsKey(src.defaultState))
+            dst.defaultState = stateMap[src.defaultState];
+
+        return dst;
+    }
+
+    private static void AddStateMachineSubAssetsToController(AnimatorController controller, AnimatorStateMachine sm)
+    {
+        if (controller == null || sm == null) return;
+
+        if (!AssetDatabase.Contains(sm))
+            AssetDatabase.AddObjectToAsset(sm, controller);
+
+        foreach (var st in sm.states)
+        {
+            if (st.state != null && !AssetDatabase.Contains(st.state))
+                AssetDatabase.AddObjectToAsset(st.state, controller);
+
+            foreach (var b in st.state.behaviours)
+            {
+                if (b != null && !AssetDatabase.Contains(b))
+                    AssetDatabase.AddObjectToAsset(b, controller);
+            }
+        }
+
+        foreach (var childSM in sm.stateMachines)
+        {
+            if (childSM.stateMachine != null)
+                AddStateMachineSubAssetsToController(controller, childSM.stateMachine);
+        }
+    }
+
+    private static void RemapParametersInStateMachine(AnimatorStateMachine sm, Dictionary<string, string> map)
+    {
+        if (sm == null || map == null || map.Count == 0) return;
+
+        foreach (var t in sm.anyStateTransitions)
+            RemapConditions(t.conditions, map);
+
+        foreach (var t in sm.entryTransitions)
+            RemapConditions(t.conditions, map);
+
+        foreach (var child in sm.states)
+        {
+            var st = child.state;
+            RemapMotion(st.motion, map);
+
+            foreach (var t in st.transitions)
+                RemapConditions(t.conditions, map);
+        }
+
+        foreach (var childSM in sm.stateMachines)
+            RemapParametersInStateMachine(childSM.stateMachine, map);
+    }
+
+    private static void RemapConditions(AnimatorCondition[] conditions, Dictionary<string, string> map)
+    {
+        if (conditions == null) return;
+        for (int i = 0; i < conditions.Length; i++)
+        {
+            if (map.TryGetValue(conditions[i].parameter, out var newName))
+                conditions[i].parameter = newName;
+        }
+    }
+
+    private static void RemapMotion(Motion motion, Dictionary<string, string> map)
+    {
+        if (motion == null) return;
+        if (motion is BlendTree bt)
+            RemapBlendTree(bt, map);
+    }
+
+    private static void RemapBlendTree(BlendTree bt, Dictionary<string, string> map)
+    {
+        if (bt == null) return;
+
+        if (map.TryGetValue(bt.blendParameter, out var newBlend))
+            bt.blendParameter = newBlend;
+
+        if (map.TryGetValue(bt.blendParameterY, out var newBlendY))
+            bt.blendParameterY = newBlendY;
+
+        var children = bt.children;
+        for (int i = 0; i < children.Length; i++)
+        {
+            var child = children[i];
+
+            if (!string.IsNullOrEmpty(child.directBlendParameter) &&
+                map.TryGetValue(child.directBlendParameter, out var newDirect))
+            {
+                child.directBlendParameter = newDirect;
+                children[i] = child;
+            }
+
+            if (child.motion is BlendTree childBT)
+                RemapBlendTree(childBT, map);
+        }
+        bt.children = children;
+    }
+
+    // =====================================================
+    // ORIGINAL PROPERTY ANIM GENERATION (UNCHANGED)
+    // =====================================================
 
     public static void GeneratePropertyAnimationsWithAvatarEntries(GameObject avatarRoot, List<PropertyAnimGenerationData> entries)
     {
@@ -910,17 +1552,17 @@ public static class CCKEnhancementEditorHelpers
                 for (int optIdx = 0; optIdx < entry.dropdownOptionCount; optIdx++)
                 {
                     AnimationClip clip = new AnimationClip();
-                    
+
                     if (entry.useMaterialProperty)
                     {
                         var enabledObjects = entry.materialTargetObjects.Where(o => o.enabled && o.gameObject != null).ToList();
                         string propName = entry.serializedProperty.Split(new[] { ' ' }, 2)[0].Replace("material.", "");
-                        
+
                         foreach (var matTarget in enabledObjects)
                         {
                             string relativePath = AnimationUtility.CalculateTransformPath(matTarget.gameObject.transform, avatarRoot.transform);
                             string materialPropPath = $"material.{propName}";
-                            
+
                             if (entry.advAvatarPropertyType == AdvAvatarPropertyType.Float)
                             {
                                 float value = Mathf.Lerp(entry.floatValue0, entry.floatValue1, (float)optIdx / (entry.dropdownOptionCount - 1));
@@ -944,7 +1586,7 @@ public static class CCKEnhancementEditorHelpers
                         string propName = parts.Length > 1 ? parts[1] : "";
                         Component comp = entry.targetObject.GetComponent(compName);
                         Type compType = comp.GetType();
-                        
+
                         if (entry.advAvatarPropertyType == AdvAvatarPropertyType.Float)
                         {
                             float value = Mathf.Lerp(entry.floatValue0, entry.floatValue1, (float)optIdx / (entry.dropdownOptionCount - 1));
@@ -956,7 +1598,7 @@ public static class CCKEnhancementEditorHelpers
                             clip.SetCurve(relativePath, compType, propName, AnimationCurve.Constant(0, 1, value));
                         }
                     }
-                    
+
                     string clipName = $"{avatarRoot.name}_{entry.advAvatarPropertyName}_{entry.dropdownOptionNames[optIdx]}.anim";
                     string clipPath = $"{folder}/{clipName}";
                     AssetDatabase.CreateAsset(clip, clipPath);
@@ -1069,7 +1711,7 @@ public static class CCKEnhancementEditorHelpers
 
                 AssetDatabase.CreateAsset(clip0, clip0Path);
                 AssetDatabase.CreateAsset(clip1, clip1Path);
-                
+
                 generatedClips.Add(clip0);
                 generatedClips.Add(clip1);
             }
