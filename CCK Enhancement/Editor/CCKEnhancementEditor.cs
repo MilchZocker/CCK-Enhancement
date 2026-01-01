@@ -57,7 +57,7 @@ public class CCKEnhancementEditorWindow : EditorWindow
         if (remIdx >= 0)
         {
             animatorMergeData.animators.RemoveAt(remIdx);
-            animatorMergeData.conflictsScanned = false; // invalidate scan
+            animatorMergeData.conflictsScanned = false;
         }
 
         if (GUILayout.Button("Add Animator Controller"))
@@ -66,11 +66,13 @@ public class CCKEnhancementEditorWindow : EditorWindow
             animatorMergeData.conflictsScanned = false;
         }
 
-        using (new EditorGUI.DisabledScope(!CCKEnhancementEditorHelpers.ValidateAvatarAndAnimators(avatarRoot, animatorMergeData.animators)))
+        bool canMerge = avatarRoot != null && animatorMergeData.animators.Count > 0;
+        using (new EditorGUI.DisabledScope(!canMerge))
         {
             if (GUILayout.Button("Scan Conflicts"))
             {
-                CCKEnhancementEditorHelpers.ScanAnimatorConflicts(animatorMergeData, avatarRoot);
+                if (CCKEnhancementEditorHelpers.ValidateAvatarAndAnimators(avatarRoot, animatorMergeData.animators))
+                    CCKEnhancementEditorHelpers.ScanAnimatorConflicts(animatorMergeData, avatarRoot);
             }
         }
 
@@ -174,17 +176,15 @@ public class CCKEnhancementEditorWindow : EditorWindow
                     if (entry.materialTargetObjects.Count > 0)
                     {
                         EditorGUILayout.LabelField($"Objects with material ({entry.materialTargetObjects.Count}):", EditorStyles.boldLabel);
-                        
+
                         EditorGUILayout.BeginHorizontal();
                         if (GUILayout.Button("Select All", GUILayout.Width(100)))
                         {
-                            foreach (var obj in entry.materialTargetObjects)
-                                obj.enabled = true;
+                            foreach (var obj in entry.materialTargetObjects) obj.enabled = true;
                         }
                         if (GUILayout.Button("Deselect All", GUILayout.Width(100)))
                         {
-                            foreach (var obj in entry.materialTargetObjects)
-                                obj.enabled = false;
+                            foreach (var obj in entry.materialTargetObjects) obj.enabled = false;
                         }
                         EditorGUILayout.EndHorizontal();
 
@@ -215,14 +215,13 @@ public class CCKEnhancementEditorWindow : EditorWindow
                         if (!string.IsNullOrEmpty(entry.serializedProperty))
                         {
                             string propName = entry.serializedProperty.Split(new[] { ' ' }, 2)[0].Replace("material.", "");
-                            if (materialPropTypes.ContainsKey(entry.targetMaterial) && 
+                            if (materialPropTypes.ContainsKey(entry.targetMaterial) &&
                                 materialPropTypes[entry.targetMaterial].ContainsKey(propName))
                             {
                                 var propType = materialPropTypes[entry.targetMaterial][propName];
-                                if (propType == ShaderUtil.ShaderPropertyType.Color)
-                                    entry.advAvatarPropertyType = AdvAvatarPropertyType.Color;
-                                else
-                                    entry.advAvatarPropertyType = AdvAvatarPropertyType.Float;
+                                entry.advAvatarPropertyType = (propType == ShaderUtil.ShaderPropertyType.Color)
+                                    ? AdvAvatarPropertyType.Color
+                                    : AdvAvatarPropertyType.Float;
                             }
                         }
                     }
@@ -252,18 +251,15 @@ public class CCKEnhancementEditorWindow : EditorWindow
             }
 
             entry.advAvatarPropertyName = EditorGUILayout.TextField("Advanced Avatar Property Name", entry.advAvatarPropertyName);
-            
-            // Show property type selector
+
             if (!entry.useMaterialProperty)
                 entry.advAvatarPropertyType = (AdvAvatarPropertyType)EditorGUILayout.EnumPopup("Property Type", entry.advAvatarPropertyType);
             else
                 EditorGUILayout.LabelField("Property Type (Auto-detected)", entry.advAvatarPropertyType.ToString());
-            
-            // CVR Settings Type selection
+
             EditorGUILayout.LabelField("CVR Advanced Settings Type", EditorStyles.boldLabel);
             entry.cvrSettingsType = (CVRSettingsType)EditorGUILayout.EnumPopup("Settings Type", entry.cvrSettingsType);
 
-            // Show appropriate value selectors based on CVR settings type and property type
             if (entry.cvrSettingsType == CVRSettingsType.Color)
             {
                 if (entry.advAvatarPropertyType == AdvAvatarPropertyType.Color)
@@ -279,12 +275,12 @@ public class CCKEnhancementEditorWindow : EditorWindow
             else if (entry.cvrSettingsType == CVRSettingsType.Dropdown)
             {
                 entry.dropdownOptionCount = EditorGUILayout.IntField("Number of Options", Mathf.Max(2, entry.dropdownOptionCount));
-                
+
                 while (entry.dropdownOptionNames.Count < entry.dropdownOptionCount)
                     entry.dropdownOptionNames.Add($"Option {entry.dropdownOptionNames.Count}");
                 while (entry.dropdownOptionNames.Count > entry.dropdownOptionCount)
                     entry.dropdownOptionNames.RemoveAt(entry.dropdownOptionNames.Count - 1);
-                
+
                 EditorGUILayout.LabelField("Dropdown Options:", EditorStyles.boldLabel);
                 for (int j = 0; j < entry.dropdownOptionNames.Count; j++)
                 {
@@ -419,13 +415,13 @@ public class CCKEnhancementEditorWindow : EditorWindow
         var propTypes = new Dictionary<string, ShaderUtil.ShaderPropertyType>();
         Shader shader = material.shader;
         int propCount = ShaderUtil.GetPropertyCount(shader);
-        
+
         for (int i = 0; i < propCount; i++)
         {
             string propName = ShaderUtil.GetPropertyName(shader, i);
             ShaderUtil.ShaderPropertyType propType = ShaderUtil.GetPropertyType(shader, i);
-            
-            if (propType == ShaderUtil.ShaderPropertyType.Float || 
+
+            if (propType == ShaderUtil.ShaderPropertyType.Float ||
                 propType == ShaderUtil.ShaderPropertyType.Range ||
                 propType == ShaderUtil.ShaderPropertyType.Color ||
                 propType == ShaderUtil.ShaderPropertyType.Vector)
@@ -435,7 +431,7 @@ public class CCKEnhancementEditorWindow : EditorWindow
                     displayName += " (Color)";
                 else if (propType == ShaderUtil.ShaderPropertyType.Range)
                     displayName += " (Range)";
-                
+
                 props.Add(displayName);
                 propTypes[propName] = propType;
             }
@@ -453,9 +449,7 @@ public class CCKEnhancementEditorWindow : EditorWindow
         foreach (var renderer in renderers)
         {
             if (renderer.sharedMaterials.Contains(material))
-            {
                 result.Add(renderer.gameObject);
-            }
         }
         return result;
     }
@@ -496,8 +490,8 @@ public class CCKEnhancementComponentEditor : Editor
     void DrawAnimatorMergeUI(CCKEnhancementComponent component)
     {
         var data = component.animatorMergeData;
-
         int remIdx = -1;
+
         for (int i = 0; i < data.animators.Count; i++)
         {
             EditorGUILayout.BeginHorizontal();
@@ -518,11 +512,13 @@ public class CCKEnhancementComponentEditor : Editor
             data.conflictsScanned = false;
         }
 
-        using (new EditorGUI.DisabledScope(!CCKEnhancementEditorHelpers.ValidateAvatarAndAnimators(component.avatarRoot, data.animators)))
+        bool canMerge = component.avatarRoot != null && data.animators.Count > 0;
+        using (new EditorGUI.DisabledScope(!canMerge))
         {
             if (GUILayout.Button("Scan Conflicts"))
             {
-                CCKEnhancementEditorHelpers.ScanAnimatorConflicts(data, component.avatarRoot);
+                if (CCKEnhancementEditorHelpers.ValidateAvatarAndAnimators(component.avatarRoot, data.animators))
+                    CCKEnhancementEditorHelpers.ScanAnimatorConflicts(data, component.avatarRoot);
             }
         }
 
@@ -549,9 +545,7 @@ public class CCKEnhancementComponentEditor : Editor
 
         EditorGUILayout.LabelField("Parameter Conflicts (Used Parameters Only)", EditorStyles.boldLabel);
         if (data.parameterConflicts.Count == 0)
-        {
             EditorGUILayout.LabelField("No parameter conflicts found.");
-        }
         else
         {
             foreach (var c in data.parameterConflicts)
@@ -561,9 +555,7 @@ public class CCKEnhancementComponentEditor : Editor
                 EditorGUILayout.LabelField($"Base: {c.incomingParameterName} ({c.baseType})");
                 c.resolution = (ParameterConflictResolution)EditorGUILayout.EnumPopup("Resolution", c.resolution);
                 if (c.resolution == ParameterConflictResolution.Rename)
-                {
                     c.resolvedParameterName = EditorGUILayout.TextField("Rename To", c.resolvedParameterName);
-                }
                 EditorGUILayout.EndVertical();
             }
         }
@@ -572,9 +564,7 @@ public class CCKEnhancementComponentEditor : Editor
 
         EditorGUILayout.LabelField("Layer Conflicts", EditorStyles.boldLabel);
         if (data.layerConflicts.Count == 0)
-        {
             EditorGUILayout.LabelField("No layer conflicts found.");
-        }
         else
         {
             foreach (var c in data.layerConflicts)
@@ -584,9 +574,7 @@ public class CCKEnhancementComponentEditor : Editor
                 EditorGUILayout.LabelField($"Base: {c.baseLayerName}");
                 c.resolution = (LayerConflictResolution)EditorGUILayout.EnumPopup("Resolution", c.resolution);
                 if (c.resolution == LayerConflictResolution.Rename)
-                {
                     c.resolvedLayerName = EditorGUILayout.TextField("Rename To", c.resolvedLayerName);
-                }
                 EditorGUILayout.EndVertical();
             }
         }
@@ -596,6 +584,7 @@ public class CCKEnhancementComponentEditor : Editor
 
     void DrawPropertyAnimationGenerationUI(CCKEnhancementComponent component)
     {
+        // unchanged from your base version (kept as-is)
         int remIdx = -1;
         for (int i = 0; i < component.propertyAnimGenData.Count; i++)
         {
@@ -620,18 +609,12 @@ public class CCKEnhancementComponentEditor : Editor
                     if (entry.materialTargetObjects.Count > 0)
                     {
                         EditorGUILayout.LabelField($"Objects with material ({entry.materialTargetObjects.Count}):", EditorStyles.boldLabel);
-                        
+
                         EditorGUILayout.BeginHorizontal();
                         if (GUILayout.Button("Select All", GUILayout.Width(100)))
-                        {
-                            foreach (var obj in entry.materialTargetObjects)
-                                obj.enabled = true;
-                        }
+                            foreach (var obj in entry.materialTargetObjects) obj.enabled = true;
                         if (GUILayout.Button("Deselect All", GUILayout.Width(100)))
-                        {
-                            foreach (var obj in entry.materialTargetObjects)
-                                obj.enabled = false;
-                        }
+                            foreach (var obj in entry.materialTargetObjects) obj.enabled = false;
                         EditorGUILayout.EndHorizontal();
 
                         EditorGUILayout.Space(5);
@@ -661,7 +644,7 @@ public class CCKEnhancementComponentEditor : Editor
                         if (!string.IsNullOrEmpty(entry.serializedProperty))
                         {
                             string propName = entry.serializedProperty.Split(new[] { ' ' }, 2)[0].Replace("material.", "");
-                            if (materialPropTypes.ContainsKey(entry.targetMaterial) && 
+                            if (materialPropTypes.ContainsKey(entry.targetMaterial) &&
                                 materialPropTypes[entry.targetMaterial].ContainsKey(propName))
                             {
                                 var propType = materialPropTypes[entry.targetMaterial][propName];
@@ -698,15 +681,16 @@ public class CCKEnhancementComponentEditor : Editor
             }
 
             entry.advAvatarPropertyName = EditorGUILayout.TextField("Advanced Avatar Property Name", entry.advAvatarPropertyName);
-            
+
             if (!entry.useMaterialProperty)
                 entry.advAvatarPropertyType = (AdvAvatarPropertyType)EditorGUILayout.EnumPopup("Property Type", entry.advAvatarPropertyType);
             else
                 EditorGUILayout.LabelField("Property Type (Auto-detected)", entry.advAvatarPropertyType.ToString());
-            
+
             EditorGUILayout.LabelField("CVR Advanced Settings Type", EditorStyles.boldLabel);
             entry.cvrSettingsType = (CVRSettingsType)EditorGUILayout.EnumPopup("Settings Type", entry.cvrSettingsType);
 
+            // value UI unchanged...
             if (entry.cvrSettingsType == CVRSettingsType.Color)
             {
                 if (entry.advAvatarPropertyType == AdvAvatarPropertyType.Color)
@@ -714,25 +698,19 @@ public class CCKEnhancementComponentEditor : Editor
                     entry.colorValue0 = EditorGUILayout.ColorField("Default Color", entry.colorValue0);
                     EditorGUILayout.HelpBox("Color type creates a color picker in-game. No animation clips generated.", MessageType.Info);
                 }
-                else
-                {
-                    EditorGUILayout.HelpBox("Color settings type only works with Color property types.", MessageType.Warning);
-                }
+                else EditorGUILayout.HelpBox("Color settings type only works with Color property types.", MessageType.Warning);
             }
             else if (entry.cvrSettingsType == CVRSettingsType.Dropdown)
             {
                 entry.dropdownOptionCount = EditorGUILayout.IntField("Number of Options", Mathf.Max(2, entry.dropdownOptionCount));
-                
                 while (entry.dropdownOptionNames.Count < entry.dropdownOptionCount)
                     entry.dropdownOptionNames.Add($"Option {entry.dropdownOptionNames.Count}");
                 while (entry.dropdownOptionNames.Count > entry.dropdownOptionCount)
                     entry.dropdownOptionNames.RemoveAt(entry.dropdownOptionNames.Count - 1);
-                
+
                 EditorGUILayout.LabelField("Dropdown Options:", EditorStyles.boldLabel);
                 for (int j = 0; j < entry.dropdownOptionNames.Count; j++)
-                {
                     entry.dropdownOptionNames[j] = EditorGUILayout.TextField($"  Option {j}", entry.dropdownOptionNames[j]);
-                }
             }
             else if (entry.cvrSettingsType == CVRSettingsType.Slider)
             {
@@ -793,6 +771,7 @@ public class CCKEnhancementComponentEditor : Editor
 
     void DrawMultiClipMergeUI(CCKEnhancementComponent component)
     {
+        // unchanged from base version (kept as-is)
         int remIdx = -1;
         for (int i = 0; i < component.multiClipMergeData.Count; i++)
         {
@@ -862,13 +841,13 @@ public class CCKEnhancementComponentEditor : Editor
         var propTypes = new Dictionary<string, ShaderUtil.ShaderPropertyType>();
         Shader shader = material.shader;
         int propCount = ShaderUtil.GetPropertyCount(shader);
-        
+
         for (int i = 0; i < propCount; i++)
         {
             string propName = ShaderUtil.GetPropertyName(shader, i);
             ShaderUtil.ShaderPropertyType propType = ShaderUtil.GetPropertyType(shader, i);
-            
-            if (propType == ShaderUtil.ShaderPropertyType.Float || 
+
+            if (propType == ShaderUtil.ShaderPropertyType.Float ||
                 propType == ShaderUtil.ShaderPropertyType.Range ||
                 propType == ShaderUtil.ShaderPropertyType.Color ||
                 propType == ShaderUtil.ShaderPropertyType.Vector)
@@ -878,7 +857,7 @@ public class CCKEnhancementComponentEditor : Editor
                     displayName += " (Color)";
                 else if (propType == ShaderUtil.ShaderPropertyType.Range)
                     displayName += " (Range)";
-                
+
                 props.Add(displayName);
                 propTypes[propName] = propType;
             }
@@ -896,9 +875,7 @@ public class CCKEnhancementComponentEditor : Editor
         foreach (var renderer in renderers)
         {
             if (renderer.sharedMaterials.Contains(material))
-            {
                 result.Add(renderer.gameObject);
-            }
         }
         return result;
     }
@@ -1253,8 +1230,7 @@ public static class CCKEnhancementEditorHelpers
                 if (overrideLayer && existingIndex >= 0)
                     mergedController.RemoveLayer(existingIndex);
 
-                AnimatorStateMachine clonedSM = CloneStateMachine(l.stateMachine, l.stateMachine.name);
-                AddStateMachineSubAssetsToController(mergedController, clonedSM);
+                AnimatorStateMachine clonedSM = CloneStateMachine(l.stateMachine, mergedController, l.stateMachine.name);
 
                 if (parameterRenameMap.Count > 0)
                     RemapParametersInStateMachine(clonedSM, parameterRenameMap);
@@ -1289,7 +1265,7 @@ public static class CCKEnhancementEditorHelpers
         );
     }
 
-    // Backwards-compatible overload
+    // Backwards compatible overload
     public static void PerformAnimatorMerge(List<AnimatorController> anims, GameObject avatar)
     {
         var tmp = new AnimatorMergeData { animators = anims };
@@ -1336,29 +1312,35 @@ public static class CCKEnhancementEditorHelpers
     }
 
     // =====================================================
-    // FIXED CLONE (NO stateMachineTransitions property)
-    // Uses GetStateMachineTransitions(childSM)
-    // Keeps nested SM targets + CVR behaviours
+    // CLONE (PERSISTENT + CORRECT OVERLOADS)
     // =====================================================
 
-    private static AnimatorStateMachine CloneStateMachine(AnimatorStateMachine src, string nameOverride = null)
+    private static AnimatorStateMachine CloneStateMachine(
+        AnimatorStateMachine src,
+        AnimatorController dstController,
+        string nameOverride = null)
     {
         if (src == null) return null;
 
         var stateMap = new Dictionary<AnimatorState, AnimatorState>();
         var smMap = new Dictionary<AnimatorStateMachine, AnimatorStateMachine>();
 
-        // 1) clone hierarchy first
-        AnimatorStateMachine dstRoot = CloneHierarchyRecursive(src, nameOverride, stateMap, smMap);
+        // 1) Clone hierarchy
+        AnimatorStateMachine dstRoot = CloneHierarchyRecursive(
+            src, dstController, nameOverride, stateMap, smMap);
 
-        // 2) rebuild transitions second
-        RebuildTransitionsRecursive(src, dstRoot, stateMap, smMap);
+        // 2) Rebuild transitions using correct overloads
+        RebuildTransitionsRecursive(src, dstRoot, dstController, stateMap, smMap);
+
+        // 3) Ensure ALL parts are sub-assets (incl transitions)
+        AddStateMachineSubAssetsToController(dstController, dstRoot);
 
         return dstRoot;
     }
 
     private static AnimatorStateMachine CloneHierarchyRecursive(
         AnimatorStateMachine src,
+        AnimatorController dstController,
         string nameOverride,
         Dictionary<AnimatorState, AnimatorState> stateMap,
         Dictionary<AnimatorStateMachine, AnimatorStateMachine> smMap)
@@ -1374,24 +1356,35 @@ public static class CCKEnhancementEditorHelpers
 
         smMap[src] = dst;
 
-        // direct states
+        if (!AssetDatabase.Contains(dst))
+            AssetDatabase.AddObjectToAsset(dst, dstController);
+
+        // States
         foreach (var child in src.states)
         {
             var oldState = child.state;
             var newState = dst.AddState(oldState.name, child.position);
 
-            // copy state data + behaviours; transitions rebuilt later
             EditorUtility.CopySerialized(oldState, newState);
-            newState.transitions = Array.Empty<AnimatorStateTransition>();
+            newState.transitions = Array.Empty<AnimatorStateTransition>(); // rebuilt later
 
             stateMap[oldState] = newState;
+
+            if (!AssetDatabase.Contains(newState))
+                AssetDatabase.AddObjectToAsset(newState, dstController);
+
+            foreach (var b in newState.behaviours)
+            {
+                if (b != null && !AssetDatabase.Contains(b))
+                    AssetDatabase.AddObjectToAsset(b, dstController);
+            }
         }
 
-        // sub state machines recursively
+        // Child state machines
         foreach (var childSM in src.stateMachines)
         {
             var oldChildSM = childSM.stateMachine;
-            var newChildSM = CloneHierarchyRecursive(oldChildSM, null, stateMap, smMap);
+            var newChildSM = CloneHierarchyRecursive(oldChildSM, dstController, null, stateMap, smMap);
             dst.AddStateMachine(newChildSM, childSM.position);
         }
 
@@ -1404,72 +1397,103 @@ public static class CCKEnhancementEditorHelpers
     private static void RebuildTransitionsRecursive(
         AnimatorStateMachine src,
         AnimatorStateMachine dst,
+        AnimatorController dstController,
         Dictionary<AnimatorState, AnimatorState> stateMap,
         Dictionary<AnimatorStateMachine, AnimatorStateMachine> smMap)
     {
         // Any State transitions
         foreach (var t in src.anyStateTransitions)
         {
-            AnimatorStateTransition newT = dst.AddAnyStateTransition((AnimatorState)null);
+            AnimatorStateTransition newT = null;
+
+            if (t.isExit)
+            {
+                newT = dst.AddAnyStateTransition((AnimatorState)null);
+            }
+            else if (t.destinationState != null && stateMap.TryGetValue(t.destinationState, out var ns))
+            {
+                newT = dst.AddAnyStateTransition(ns);
+            }
+            else if (t.destinationStateMachine != null && smMap.TryGetValue(t.destinationStateMachine, out var nsm))
+            {
+                newT = dst.AddAnyStateTransition(nsm);
+            }
+            else
+            {
+                newT = dst.AddAnyStateTransition((AnimatorState)null);
+            }
+
             EditorUtility.CopySerialized(t, newT);
 
+            // Re-assign destination AFTER copy
             newT.destinationState =
-                t.destinationState != null && stateMap.TryGetValue(t.destinationState, out var ns)
-                    ? ns
-                    : null;
-
+                t.destinationState != null && stateMap.TryGetValue(t.destinationState, out var ns2) ? ns2 : null;
             newT.destinationStateMachine =
-                t.destinationStateMachine != null && smMap.TryGetValue(t.destinationStateMachine, out var nsm)
-                    ? nsm
-                    : null;
+                t.destinationStateMachine != null && smMap.TryGetValue(t.destinationStateMachine, out var nsm2) ? nsm2 : null;
+
+            if (!AssetDatabase.Contains(newT))
+                AssetDatabase.AddObjectToAsset(newT, dstController);
         }
 
         // Entry transitions
         foreach (var t in src.entryTransitions)
         {
-            AnimatorTransition newT = dst.AddEntryTransition((AnimatorState)null);
+            AnimatorTransition newT = null;
+
+            if (t.isExit)
+            {
+                newT = dst.AddEntryTransition((AnimatorState)null);
+            }
+            else if (t.destinationState != null && stateMap.TryGetValue(t.destinationState, out var ns))
+            {
+                newT = dst.AddEntryTransition(ns);
+            }
+            else if (t.destinationStateMachine != null && smMap.TryGetValue(t.destinationStateMachine, out var nsm))
+            {
+                newT = dst.AddEntryTransition(nsm);
+            }
+            else
+            {
+                newT = dst.AddEntryTransition((AnimatorState)null);
+            }
+
             EditorUtility.CopySerialized(t, newT);
 
             newT.destinationState =
-                t.destinationState != null && stateMap.TryGetValue(t.destinationState, out var ns)
-                    ? ns
-                    : null;
-
+                t.destinationState != null && stateMap.TryGetValue(t.destinationState, out var ns2) ? ns2 : null;
             newT.destinationStateMachine =
-                t.destinationStateMachine != null && smMap.TryGetValue(t.destinationStateMachine, out var nsm)
-                    ? nsm
-                    : null;
+                t.destinationStateMachine != null && smMap.TryGetValue(t.destinationStateMachine, out var nsm2) ? nsm2 : null;
+
+            if (!AssetDatabase.Contains(newT))
+                AssetDatabase.AddObjectToAsset(newT, dstController);
         }
 
-        // StateMachine transitions (per child SM; supported API)
+        // Child StateMachine transitions
         foreach (var childSM in src.stateMachines)
         {
             var oldChild = childSM.stateMachine;
             if (oldChild == null) continue;
+            if (!smMap.TryGetValue(oldChild, out var newChild)) continue;
 
             var srcTransitions = src.GetStateMachineTransitions(oldChild);
             if (srcTransitions == null) continue;
 
             foreach (var t in srcTransitions)
             {
-                if (!smMap.TryGetValue(oldChild, out var newChild)) continue;
-
                 AnimatorTransition newT = dst.AddStateMachineTransition(newChild);
                 EditorUtility.CopySerialized(t, newT);
 
                 newT.destinationState =
-                    t.destinationState != null && stateMap.TryGetValue(t.destinationState, out var ns)
-                        ? ns
-                        : null;
-
+                    t.destinationState != null && stateMap.TryGetValue(t.destinationState, out var ns2) ? ns2 : null;
                 newT.destinationStateMachine =
-                    t.destinationStateMachine != null && smMap.TryGetValue(t.destinationStateMachine, out var nsm)
-                        ? nsm
-                        : null;
+                    t.destinationStateMachine != null && smMap.TryGetValue(t.destinationStateMachine, out var nsm2) ? nsm2 : null;
+
+                if (!AssetDatabase.Contains(newT))
+                    AssetDatabase.AddObjectToAsset(newT, dstController);
             }
         }
 
-        // State transitions within this SM
+        // State transitions
         foreach (var child in src.states)
         {
             var oldState = child.state;
@@ -1478,29 +1502,45 @@ public static class CCKEnhancementEditorHelpers
 
             foreach (var t in oldState.transitions)
             {
-                AnimatorStateTransition newT = newState.AddTransition((AnimatorState)null);
+                AnimatorStateTransition newT = null;
+
+                if (t.isExit)
+                {
+                    newT = newState.AddExitTransition();
+                }
+                else if (t.destinationState != null && stateMap.TryGetValue(t.destinationState, out var ns))
+                {
+                    newT = newState.AddTransition(ns);
+                }
+                else if (t.destinationStateMachine != null && smMap.TryGetValue(t.destinationStateMachine, out var nsm))
+                {
+                    newT = newState.AddTransition(nsm);
+                }
+                else
+                {
+                    newT = newState.AddTransition((AnimatorState)null);
+                }
+
                 EditorUtility.CopySerialized(t, newT);
 
                 newT.destinationState =
-                    t.destinationState != null && stateMap.TryGetValue(t.destinationState, out var ns)
-                        ? ns
-                        : null;
-
+                    t.destinationState != null && stateMap.TryGetValue(t.destinationState, out var ns2) ? ns2 : null;
                 newT.destinationStateMachine =
-                    t.destinationStateMachine != null && smMap.TryGetValue(t.destinationStateMachine, out var nsm)
-                        ? nsm
-                        : null;
+                    t.destinationStateMachine != null && smMap.TryGetValue(t.destinationStateMachine, out var nsm2) ? nsm2 : null;
+
+                if (!AssetDatabase.Contains(newT))
+                    AssetDatabase.AddObjectToAsset(newT, dstController);
             }
         }
 
-        // recurse into children
+        // recurse
         foreach (var childSM in src.stateMachines)
         {
             var oldChild = childSM.stateMachine;
             if (oldChild == null) continue;
             if (!smMap.TryGetValue(oldChild, out var newChild)) continue;
 
-            RebuildTransitionsRecursive(oldChild, newChild, stateMap, smMap);
+            RebuildTransitionsRecursive(oldChild, newChild, dstController, stateMap, smMap);
         }
     }
 
@@ -1511,22 +1551,39 @@ public static class CCKEnhancementEditorHelpers
         if (!AssetDatabase.Contains(sm))
             AssetDatabase.AddObjectToAsset(sm, controller);
 
-        foreach (var st in sm.states)
+        foreach (var s in sm.states)
         {
-            if (st.state != null && !AssetDatabase.Contains(st.state))
-                AssetDatabase.AddObjectToAsset(st.state, controller);
+            if (s.state != null && !AssetDatabase.Contains(s.state))
+                AssetDatabase.AddObjectToAsset(s.state, controller);
 
-            foreach (var b in st.state.behaviours)
-            {
+            foreach (var b in s.state.behaviours)
                 if (b != null && !AssetDatabase.Contains(b))
                     AssetDatabase.AddObjectToAsset(b, controller);
-            }
+
+            foreach (var t in s.state.transitions)
+                if (t != null && !AssetDatabase.Contains(t))
+                    AssetDatabase.AddObjectToAsset(t, controller);
         }
 
-        foreach (var childSM in sm.stateMachines)
+        foreach (var t in sm.anyStateTransitions)
+            if (t != null && !AssetDatabase.Contains(t))
+                AssetDatabase.AddObjectToAsset(t, controller);
+
+        foreach (var t in sm.entryTransitions)
+            if (t != null && !AssetDatabase.Contains(t))
+                AssetDatabase.AddObjectToAsset(t, controller);
+
+        foreach (var child in sm.stateMachines)
         {
-            if (childSM.stateMachine != null)
-                AddStateMachineSubAssetsToController(controller, childSM.stateMachine);
+            var childSm = child.stateMachine;
+            if (childSm == null) continue;
+
+            AddStateMachineSubAssetsToController(controller, childSm);
+
+            var smTransitions = sm.GetStateMachineTransitions(childSm);
+            foreach (var t in smTransitions)
+                if (t != null && !AssetDatabase.Contains(t))
+                    AssetDatabase.AddObjectToAsset(t, controller);
         }
     }
 
@@ -1578,7 +1635,6 @@ public static class CCKEnhancementEditorHelpers
 
         if (map.TryGetValue(bt.blendParameter, out var newBlend))
             bt.blendParameter = newBlend;
-
         if (map.TryGetValue(bt.blendParameterY, out var newBlendY))
             bt.blendParameterY = newBlendY;
 
@@ -1606,6 +1662,7 @@ public static class CCKEnhancementEditorHelpers
 
     public static void GeneratePropertyAnimationsWithAvatarEntries(GameObject avatarRoot, List<PropertyAnimGenerationData> entries)
     {
+        // unchanged from base (kept)
         if (avatarRoot == null || entries == null) return;
 
         CVRAvatar cvrAvatar = avatarRoot.GetComponent<CVRAvatar>();
@@ -1640,17 +1697,17 @@ public static class CCKEnhancementEditorHelpers
                 for (int optIdx = 0; optIdx < entry.dropdownOptionCount; optIdx++)
                 {
                     AnimationClip clip = new AnimationClip();
-                    
+
                     if (entry.useMaterialProperty)
                     {
                         var enabledObjects = entry.materialTargetObjects.Where(o => o.enabled && o.gameObject != null).ToList();
                         string propName = entry.serializedProperty.Split(new[] { ' ' }, 2)[0].Replace("material.", "");
-                        
+
                         foreach (var matTarget in enabledObjects)
                         {
                             string relativePath = AnimationUtility.CalculateTransformPath(matTarget.gameObject.transform, avatarRoot.transform);
                             string materialPropPath = $"material.{propName}";
-                            
+
                             if (entry.advAvatarPropertyType == AdvAvatarPropertyType.Float)
                             {
                                 float value = Mathf.Lerp(entry.floatValue0, entry.floatValue1, (float)optIdx / (entry.dropdownOptionCount - 1));
@@ -1674,7 +1731,7 @@ public static class CCKEnhancementEditorHelpers
                         string propName = parts.Length > 1 ? parts[1] : "";
                         Component comp = entry.targetObject.GetComponent(compName);
                         Type compType = comp.GetType();
-                        
+
                         if (entry.advAvatarPropertyType == AdvAvatarPropertyType.Float)
                         {
                             float value = Mathf.Lerp(entry.floatValue0, entry.floatValue1, (float)optIdx / (entry.dropdownOptionCount - 1));
@@ -1686,7 +1743,7 @@ public static class CCKEnhancementEditorHelpers
                             clip.SetCurve(relativePath, compType, propName, AnimationCurve.Constant(0, 1, value));
                         }
                     }
-                    
+
                     string clipName = $"{avatarRoot.name}_{entry.advAvatarPropertyName}_{entry.dropdownOptionNames[optIdx]}.anim";
                     string clipPath = $"{folder}/{clipName}";
                     AssetDatabase.CreateAsset(clip, clipPath);
@@ -1799,7 +1856,7 @@ public static class CCKEnhancementEditorHelpers
 
                 AssetDatabase.CreateAsset(clip0, clip0Path);
                 AssetDatabase.CreateAsset(clip1, clip1Path);
-                
+
                 generatedClips.Add(clip0);
                 generatedClips.Add(clip1);
             }
@@ -1878,6 +1935,7 @@ public static class CCKEnhancementEditorHelpers
 
     public static void MergeMultipleClipsToAvatarEntries(GameObject avatarRoot, List<MultiClipMergeData> entries)
     {
+        // unchanged from base (kept)
         if (avatarRoot == null || entries == null) return;
 
         CVRAvatar cvrAvatar = avatarRoot.GetComponent<CVRAvatar>();
